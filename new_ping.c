@@ -44,7 +44,7 @@ int createPacket(char *packet, int seq) {
     memcpy((packet), &icmphdr, ICMP_HDRLEN);
 
     char data[IP_MAXPACKET] = "ping\n";
-    int datalen = strlen(data) + 1;
+    int datalen = (int) strlen(data) + 1;
     memcpy(packet + ICMP_HDRLEN, data, datalen);
 
     icmphdr.icmp_cksum = checksum((unsigned short *) (packet), ICMP_HDRLEN + datalen);
@@ -86,9 +86,9 @@ int main(int argc, char *argv[]) {
     // compiled watchdog.c by makefile
     args[0] = "./watchdog";
     args[1] = NULL;
-
+    //int c = 0;
     while (true) {
-
+        //c++;
         // fork a child process for watchdog
         int pid = fork();
         if (pid == 0) {
@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
             struct timeval start, end;
             gettimeofday(&start, 0);
 
-            int bytes_sent = sendto(sock, packet, packetlen, 0, (struct sockaddr *) &dest_in, sizeof(dest_in));
+            int bytes_sent = (int) sendto(sock, packet, packetlen, 0, (struct sockaddr *) &dest_in, sizeof(dest_in));
             if (bytes_sent == -1) { return -1; }
 
             bzero(packet, IP_MAXPACKET);
@@ -110,13 +110,15 @@ int main(int argc, char *argv[]) {
                     break;
                 }
             }
-
+            //if (c > 5)
+            //    sleep(10);
             gettimeofday(&end, 0);
             kill(pid, SIGKILL);
 
             char reply[IP_MAXPACKET];
             memcpy(reply, packet + ICMP_HDRLEN + IP4_HDRLEN, packetlen - ICMP_HDRLEN); // get reply data from packet
-            float time = (float) (end.tv_sec - start.tv_sec) * 1000.0 + (float) (end.tv_usec - start.tv_usec) / 1000.0;
+            float time = (float) ((float) (end.tv_sec - start.tv_sec) * 1000.0 +
+                                  (float) (end.tv_usec - start.tv_usec) / 1000.0);
             printf("%zd bytes from: %s seq: %d time: %0.3f ms\n", bytesRec, IP, count, time);
             count++;
             bzero(packet, IP_MAXPACKET);

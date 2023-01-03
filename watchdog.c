@@ -5,7 +5,7 @@
 #define true 1
 
 int main() {
-    printf("hello partb");
+    printf("hello partb\n");
     struct timeval start, end;
     long time;
     gettimeofday(&start, NULL);
@@ -13,8 +13,7 @@ int main() {
     while (true) {
         gettimeofday(&end, NULL);
         time = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_usec - start.tv_usec) / 1000;
-        if (time >= 10000)
-        {
+        if (time >= 10000) {
             break;
         }
     }
