@@ -15,7 +15,6 @@
 #define ICMP_HDRLEN 8
 #define true 1
 
-
 unsigned short checksum(void *b, int len) {
     unsigned short *buf = b;
     unsigned int sum;
@@ -51,7 +50,6 @@ int createPacket(char *packet, int seq) {
 
     return ICMP_HDRLEN + datalen;
 }
-
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
