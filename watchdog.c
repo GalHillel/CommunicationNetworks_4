@@ -13,8 +13,6 @@
 #define true 1
 
 int main() {
-    printf("hello partb\n");
-
     int watchdogSock = socket(AF_INET, SOCK_STREAM, 0);
     if (watchdogSock == -1) {
         printf("Socket not created: %d", errno);

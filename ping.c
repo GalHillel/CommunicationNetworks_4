@@ -39,8 +39,6 @@ int main(int argc, char *strings[]) {
         exit(0);
     }
 
-    printf("hello parta\n");
-
     struct hostent *hname;
     hname = gethostbyname(strings[1]);
 

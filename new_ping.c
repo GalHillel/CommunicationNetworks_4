@@ -86,7 +86,7 @@ int main(int argc, char *strings[]) {
     int pid = fork();
 
     if (pid == 0) {
-        printf("In child\n");
+        //printf("In child\n");
         execvp(args[0], args);
     } else {
         sleep(2);
@@ -131,7 +131,6 @@ int main(int argc, char *strings[]) {
             strcpy(pingStatus, "ping");
             send(tcpSocket, pingStatus, sizeof(pingStatus), 0);
 
-            //printf("Waiting for ICMP Echo Response...\n");
             // to check watchdog
             if (counter > 5)
                 sleep(10);
@@ -165,8 +164,6 @@ int main(int argc, char *strings[]) {
                 }
             }
         }
-        // wait(&status); // waiting for child to finish before exiting
-        // printf("child exit status is: %d", status);
         close(tcpSocket);
         close(rawSocket);
     }
