@@ -1,130 +1,174 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <signal.h>
+#include <resolv.h>
+#include <netdb.h>
 
+// run 2 programs using fork + exec
 // command: make clean && make all && ./partb
 
-#define IP4_HDRLEN 20
 #define ICMP_HDRLEN 8
+#define WATCHDOG_IP "127.0.0.1"
+#define WATCHDOG_PORT 3000
 #define true 1
 
-unsigned short checksum(void *b, int len) {
-    unsigned short *buf = b;
-    unsigned int sum;
-    unsigned short result;
+unsigned short calculate_checksum(unsigned short *paddress, int len) {
+    int sum = 0;
+    unsigned short *w = paddress;
+    unsigned short answer = 0;
 
-    for (sum = 0; len > 1; len -= 2)
-        sum += *buf++;
-    if (len == 1)
-        sum += *(unsigned char *) buf;
-    sum = (sum >> 16) + (sum & 0xFFFF);
+    for (; len > 1; len -= 2) {
+        sum += *w++;
+    }
+    if (len == 1) {
+        *((unsigned char *) &answer) = *((unsigned char *) w);
+        sum += answer;
+    }
+    sum = (sum >> 16) + (sum & 0xffff);
     sum += (sum >> 16);
-    result = ~sum;
-    return result;
+    answer = ~sum;
+
+    return answer;
 }
 
-int createPacket(char *packet, int seq) {
-    struct icmp icmphdr;
-
-    icmphdr.icmp_type = ICMP_ECHO;
-    icmphdr.icmp_code = 0;
-    icmphdr.icmp_cksum = 0;
-    icmphdr.icmp_id = 24;
-    icmphdr.icmp_seq = seq;
-
-    memcpy((packet), &icmphdr, ICMP_HDRLEN);
-
-    char data[IP_MAXPACKET] = "ping\n";
-    int datalen = (int) strlen(data) + 1;
-    memcpy(packet + ICMP_HDRLEN, data, datalen);
-
-    icmphdr.icmp_cksum = checksum((unsigned short *) (packet), ICMP_HDRLEN + datalen);
-    memcpy((packet), &icmphdr, ICMP_HDRLEN);
-
-    return ICMP_HDRLEN + datalen;
-}
-
-int main(int argc, char *argv[]) {
+int main(int argc, char *strings[]) {
     if (argc != 2) {
-        printf("Usage:sudo ./partb <IP>\n");
-        return 0;
+        printf("usage: %s <addr>\n", strings[0]);
+        exit(0);
     }
 
-    char IP[INET_ADDRSTRLEN];
-    strcpy(IP, argv[1]);
-    struct in_addr addr;
-    if (inet_pton(AF_INET, IP, &addr) != 1) {
-        printf("Invalid IP-address\n");
-        return 0;
+    int tcpSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcpSocket == -1) {
+        printf("Socket not created: %d\n", errno);
     }
 
-    int count = 0;
-    char packet[IP_MAXPACKET];
-    int packetlen = createPacket(packet, count);
+    struct sockaddr_in watchdogAddr;
+    memset(&watchdogAddr, 0, sizeof(watchdogAddr));
+    watchdogAddr.sin_family = AF_INET;
+    watchdogAddr.sin_port = htons(WATCHDOG_PORT);
+    int ip_addr = inet_pton(AF_INET, (const char *) WATCHDOG_IP, &watchdogAddr.sin_addr);
+    if (ip_addr < 1)
+        printf("inet_pton() failed %d: ", errno);
 
-    struct sockaddr_in dest_in;
-    memset(&dest_in, 0, sizeof(struct sockaddr_in));
-    dest_in.sin_family = AF_INET;
+    struct hostent *hname;
+    hname = gethostbyname(strings[1]);
 
-    dest_in.sin_addr.s_addr = inet_addr(IP);
+    struct sockaddr_in destAddr;
+    bzero(&destAddr, sizeof(destAddr));
+    destAddr.sin_family = AF_INET;
+    destAddr.sin_port = 0;
+    destAddr.sin_addr.s_addr = *(long *) hname->h_addr;
 
-    int sock;
-    if ((sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)) == -1) { return -1; }
+    int rawSocket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (rawSocket < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    int ttl = 255;
+    int sockopt = setsockopt(rawSocket, SOL_IP, IP_TTL, &ttl, sizeof(ttl));
+    if (sockopt != 0) {
+        perror("setsockopt");
+        return -1;
+    }
 
     char *args[2];
-
-    // compiled watchdog.c by makefile
     args[0] = "./watchdog";
     args[1] = NULL;
-    //int c = 0;
-    while (true) {
-        //c++;
-        // fork a child process for watchdog
-        int pid = fork();
-        if (pid == 0) {
-            printf("in child \n");
-            // execute watchdog
-            execvp(args[0], args);
-        } else {
-            struct timeval start, end;
-            gettimeofday(&start, 0);
+    int pid = fork();
 
-            int bytes_sent = (int) sendto(sock, packet, packetlen, 0, (struct sockaddr *) &dest_in, sizeof(dest_in));
-            if (bytes_sent == -1) { return -1; }
+    if (pid == 0) {
+        printf("In child\n");
+        execvp(args[0], args);
+    } else {
+        sleep(2);
+        int connectionStatus = connect(tcpSocket, (struct sockaddr *) &watchdogAddr, sizeof(watchdogAddr));
+        if (connectionStatus == -1) {
+            printf("Socket not connected: %d", errno);
+        }
+
+        int flag = 0;
+        while (!flag) {
+            recv(tcpSocket, &flag, 1, 0);
+        }
+
+        send(tcpSocket, strings[1], sizeof(strings[1]), 0);
+        char data[IP_MAXPACKET] = "Ping.\n";
+        int dataLength = (int) strlen(data) + 1;
+        char packet[IP_MAXPACKET];
+        int seq = 0;
+        struct timeval start, end;
+        char pingStatus[5];
+        // to check watchdog
+        int counter = 0;
+
+        while (true) {
+            counter++;
+            struct icmp icmphdr;
+            icmphdr.icmp_type = ICMP_ECHO;
+            icmphdr.icmp_code = 0;
+            icmphdr.icmp_id = 18;
+            icmphdr.icmp_seq = seq++;
+            icmphdr.icmp_cksum = 0;
 
             bzero(packet, IP_MAXPACKET);
-            socklen_t len = sizeof(dest_in);
-            ssize_t bytesRec;
-            while ((bytesRec = recvfrom(sock, packet, sizeof(packet), 0, (struct sockaddr *) &dest_in, &len))) {
-                if (bytesRec > 0) {
-                    break;
+            memcpy((packet), &icmphdr, ICMP_HDRLEN);
+            memcpy(packet + ICMP_HDRLEN, data, dataLength);
+            icmphdr.icmp_cksum = calculate_checksum((unsigned short *) (packet), ICMP_HDRLEN + dataLength);
+            memcpy((packet), &icmphdr, ICMP_HDRLEN);
+
+            gettimeofday(&start, 0);
+            sendto(rawSocket, packet, ICMP_HDRLEN + dataLength, 0, (struct sockaddr *) &destAddr, sizeof(destAddr));
+
+            strcpy(pingStatus, "ping");
+            send(tcpSocket, pingStatus, sizeof(pingStatus), 0);
+
+            //printf("Waiting for ICMP Echo Response...\n");
+            // to check watchdog
+            if (counter > 5)
+                sleep(10);
+//
+            bzero(packet, IP_MAXPACKET);
+            int replyPID = fork();
+
+            if (replyPID == 0) {
+                recv(tcpSocket, &packet, sizeof(packet), 0);
+                if (strcmp("Timeout", packet) == 0) {
+                    printf("Received timeout.\n");
+                    int myPid = getppid();
+                    kill(myPid, SIGTERM);
+                    exit(0);
+                }
+            } else {
+                socklen_t length = sizeof(destAddr);
+                int bytesReceived = (int) recvfrom(rawSocket, packet, sizeof(packet), 0, (struct sockaddr *) &destAddr,
+                                                   &length);
+                if (bytesReceived > 0) {
+                    gettimeofday(&end, 0);
+
+                    strcpy(pingStatus, "pong");
+                    send(tcpSocket, pingStatus, sizeof(pingStatus), 0);
+
+                    float time = (float) (end.tv_sec - start.tv_sec) * 1000.0f +
+                                 (float) (end.tv_usec - start.tv_usec) / 1000.0f;
+                    printf("Ping returned: %d bytes from IP = %s, Seq = %d, time = %.3f ms\n", bytesReceived,
+                           strings[1], seq, time);
+                    sleep(1);
                 }
             }
-            //if (c > 5)
-            //    sleep(10);
-            gettimeofday(&end, 0);
-            kill(pid, SIGKILL);
-
-            char reply[IP_MAXPACKET];
-            memcpy(reply, packet + ICMP_HDRLEN + IP4_HDRLEN, packetlen - ICMP_HDRLEN); // get reply data from packet
-            float time = (float) ((float) (end.tv_sec - start.tv_sec) * 1000.0 +
-                                  (float) (end.tv_usec - start.tv_usec) / 1000.0);
-            printf("%zd bytes from: %s seq: %d time: %0.3f ms\n", bytesRec, IP, count, time);
-            count++;
-            bzero(packet, IP_MAXPACKET);
-
-            sleep(1);
         }
+        // wait(&status); // waiting for child to finish before exiting
+        // printf("child exit status is: %d", status);
+        close(tcpSocket);
+        close(rawSocket);
     }
-
-    close(sock);
     return 0;
 }
